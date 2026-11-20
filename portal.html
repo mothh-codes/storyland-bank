@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Patient Portal | Dr. Moth Hill Surgical Practice</title>
+<style>
+:root{--bg:#f2f8f8;--card:#fff;--ink:#16302f;--mute:#5d7776;--pri:#0f766e;--line:#d6e6e5;--bad:#b42318;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1c1c;--card:#162828;--ink:#e8f4f3;--mute:#9bb5b3;--line:#263f3e;--pri:#2bb3a6;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0e1c1c;--card:#162828;--ink:#e8f4f3;--mute:#9bb5b3;--line:#263f3e;--pri:#2bb3a6;color-scheme:dark}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:0 16px 24px}
+header{padding:22px 0 14px;text-align:center;border-bottom:2px solid var(--pri)}
+header small{letter-spacing:.14em;text-transform:uppercase;color:var(--pri);font-size:11px;font-weight:700}
+header h1{font:700 22px/1.2 Georgia,serif;margin:4px 0 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:14px}
+.card h2{font:700 16px/1.3 Georgia,serif;margin:0 0 8px}
+label{display:block;font-size:13px;color:var(--mute);margin:8px 0 4px}
+input,select{width:100%;padding:11px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:16px}
+button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--pri);color:#fff;font-size:16px;font-weight:700}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}.row:last-child{border:0}
+.mute{color:var(--mute);font-size:13px}.err{color:var(--bad);font-size:14px;margin-top:8px}.bad{color:var(--bad);font-weight:700}
+.sm{width:auto;margin:0;padding:8px 12px;font-size:14px}.gray{background:var(--line)!important;color:var(--ink)!important}
+.pair{display:flex;gap:8px}.pair button{margin-top:8px;padding:9px}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--pri);color:#fff}
+.nav{display:flex;gap:6px;margin-top:14px}.nav button{margin:0;padding:9px 6px;font-size:14px;background:var(--line);color:var(--ink)}.nav .on{background:var(--pri);color:#fff}
+a{color:var(--pri);font-weight:700}
+</style></head><body>
+<header><small>Dr. Moth Hill Surgical Practice</small><h1>Patient Portal</h1></header>
+<div id="app"><p class="mute" style="text-align:center">Loading...</p></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const FIREBASE_CONFIG={apiKey:"AIzaSyDcD7tNneEY23R8yPtY9aBXMWIDmxX0SX0",authDomain:"storyland-bank-b0400.firebaseapp.com",projectId:"storyland-bank-b0400",storageBucket:"storyland-bank-b0400.firebasestorage.app",messagingSenderId:"761721226563",appId:"1:761721226563:web:2d7a410e64b18ffef91bf6"};
+const ADMIN_PIN="1234",START=1000,OD=100,ODFEE=25;
+const STD=[["Patient Care Continuation Agreement","Patient_Care_Continuation_Agreement.pdf"],["Follow-Up Patient Intake Form","1_Follow_Up_Intake_Form.pdf"],["Medical POA Reestablishment","2_Medical_POA_Reestablishment.pdf"],["Consent to Bill Insurance","3_Consent_to_Bill_Insurance.pdf"]];
+let db,loaded=false,me=localStorage.getItem("sb_me"),staff=false,askpin=false,players={},tx=[],bills=[],appts=[],docs=[],reqs=[],tab="home",err="",draft={};
+const $=s=>document.querySelector(s),esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const nm=id=>(players[id]&&players[id].name)||"Someone";
+const bal=id=>tx.reduce((s,t)=>s+(t.to===id?t.amount:0)-(t.from===id?t.amount:0),START);
+const late=r=>r.due&&Date.now()>r.due?Math.max(5,Math.round(r.amount*.1)):0;
+const add=(from,to,amount,note,kind)=>db.collection("transfers").add({from,to,amount,note:note||"",kind:kind||"transfer",ts:Date.now()});
+const run=async f=>{err="";try{await f()}catch(e){err=e.message||e.code||"Something went wrong"}render()};
+const inp=(id,l,p,t)=>'<label>'+l+'</label><input id="'+id+'" type="'+(t||"text")+'" maxlength="60" placeholder="'+(p||"")+'" value="'+esc(draft[id])+'">';
+const sel=(ids,ph,id)=>'<select id="'+(id||"to")+'"><option value="">'+ph+'</option>'+ids.map(i=>'<option value="'+i+'"'+(draft[id||"to"]===i?" selected":"")+'>'+esc(nm(i))+'</option>').join("")+'</select>';
+const btn=(a,l,id,c)=>'<button data-a="'+a+'"'+(id?' data-id="'+id+'"':'')+(c?' class="'+c+'"':'')+'>'+l+'</button>';
+const E=()=>err?'<div class="err">'+esc(err)+'</div>':"";
+const fmt=t=>new Date(t).toLocaleString([],{dateStyle:"medium",timeStyle:"short"});
+const act={
+ pick:()=>{if(!draft.pick)return;me=draft.pick;localStorage.setItem("sb_me",me);draft={};render()},
+ out:()=>{me=null;localStorage.removeItem("sb_me");render()},
+ acx:d=>run(()=>db.doc("appointments/"+d.id).update({status:"canceled"})),
+ pay:d=>run(async()=>{const r=bills.find(x=>x.id===d.id),t=r.amount+late(r),b=bal(me);if(b-t<-OD)throw Error("Not enough Storyland Bucks. Visit the bank to add funds.");await add(me,r.from,t,r.note||"Bill paid","bill");await db.doc("requests/"+r.id).update({status:"paid"});if(b-t<0)await add(me,"bank",ODFEE,"Overdraft fee","fee")}),
+ tab:d=>{tab=d.id;err="";render()},
+ reqsend:()=>run(async()=>{if(!draft.rdate||!draft.rtime)throw Error("Choose a preferred date and time.");await db.collection("apptRequests").add({patient:me,type:(draft.rtype||"Appointment").trim(),ts:new Date(draft.rdate+"T"+draft.rtime).getTime(),note:(draft.rnote||"").trim(),status:"pending",created:Date.now()});draft={}}),
+ rcx:d=>run(()=>db.doc("apptRequests/"+d.id).update({status:"canceled"})),
+ rapprove:d=>run(async()=>{const r=reqs.find(x=>x.id===d.id);await db.collection("appointments").add({patient:r.patient,type:r.type,surgeon:"Dr. Moth Hill",ts:r.ts,status:"scheduled"});await db.doc("apptRequests/"+r.id).update({status:"approved"})}),
+ rdecline:d=>run(()=>db.doc("apptRequests/"+d.id).update({status:"declined"})),
+ sign:d=>run(async()=>{const n=(prompt("Type your full name to sign this document")||"").trim();if(!n)return;await db.doc("documents/"+d.id).update({status:"signed",signedBy:n,signedTs:Date.now()})}),
+ adddoc:()=>run(async()=>{if(!draft.to||!draft.dtitle)throw Error("Choose a patient and enter a title.");await db.collection("documents").add({patient:draft.to,title:draft.dtitle.trim(),file:(draft.dfile||"").trim(),status:draft.dstat||"pending",signedTs:draft.dstat==="signed"?Date.now():null,ts:Date.now()});draft={}}),
+ stdforms:()=>run(async()=>{if(!draft.to)throw Error("Choose a patient first.");for(const f of STD)await db.collection("documents").add({patient:draft.to,title:f[0],file:f[1],status:"pending",signedTs:null,ts:Date.now()})}),
+ dmark:d=>run(()=>db.doc("documents/"+d.id).update({status:"signed",signedBy:"Signed in office",signedTs:Date.now()})),
+ ddel:d=>run(()=>db.doc("documents/"+d.id).delete()),
+ askpin:()=>{askpin=true;render()},
+ unlock:()=>run(async()=>{if(draft.pin!==ADMIN_PIN)throw Error("Wrong PIN.");staff=true;askpin=false;draft={}}),
+ exit:()=>{staff=false;askpin=false;draft={};render()},
+ sched:()=>run(async()=>{if(!draft.to||!draft.adate||!draft.atime)throw Error("Choose a patient, date, and time.");await db.collection("appointments").add({patient:draft.to,type:(draft.atype||"Appointment").trim(),surgeon:"Dr. Moth Hill",ts:new Date(draft.adate+"T"+draft.atime).getTime(),status:"scheduled"});draft={}}),
+ aok:d=>run(()=>db.doc("appointments/"+d.id).update({status:"completed"})),
+ amiss:d=>run(async()=>{const a=appts.find(x=>x.id===d.id);await db.doc("appointments/"+d.id).update({status:"missed"});await add(a.patient,"bank",50,"Missed appointment fee","fee")})
+};
+function render(){
+ const a=$("#app");
+ if(!db||!loaded){a.innerHTML='<p class="mute" style="text-align:center">Connecting...</p>'+E();return}
+ let h="";
+ if(staff){
+  const sc=appts.filter(x=>x.status==="scheduled").sort((x,y)=>x.ts-y.ts);
+  const rq=reqs.filter(x=>x.status==="pending").sort((x,y)=>x.created-y.created);
+  const inbox='<div class="card"><h2>Appointment requests'+(rq.length?' ('+rq.length+')':'')+'</h2>'+(rq.length?rq.map(x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">Wants '+fmt(x.ts)+(x.note?' &middot; '+esc(x.note):'')+'</div><div class="pair"><button data-a="rapprove" data-id="'+x.id+'">Approve</button><button class="gray" data-a="rdecline" data-id="'+x.id+'">Decline</button></div></div></div>').join(""):'<p class="mute">No new requests.</p>')+'</div>';
+  const dadm='<div class="card"><h2>Add a document</h2>'+sel(Object.keys(players),"Choose a patient...")+inp("dtitle","Title","Consent to Bill Insurance")+inp("dfile","File name in website folder","3_Consent_to_Bill_Insurance.pdf")+'<label>Status</label><select id="dstat"><option value="pending"'+(draft.dstat==="signed"?'':' selected')+'>Waiting for signature</option><option value="signed"'+(draft.dstat==="signed"?' selected':'')+'>Already signed</option></select>'+btn("adddoc","Add document")+btn("stdforms","Add the 4 standard forms","","gray")+E()+'</div><div class="card"><h2>All documents</h2>'+(docs.length?docs.slice().sort((x,y)=>y.ts-x.ts).map(x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+esc(nm(x.patient))+' &middot; '+(x.status==="signed"?"signed":"pending")+'</div></div><div style="display:flex;gap:6px">'+(x.status!=="signed"?'<button class="sm" data-a="dmark" data-id="'+x.id+'">Mark signed</button>':'')+'<button class="sm gray" data-a="ddel" data-id="'+x.id+'">Remove</button></div></div>').join(""):'<p class="mute">No documents yet.</p>')+'</div>';
+  h=inbox+'<div class="card"><h2>Staff: schedule an appointment</h2>'+sel(Object.keys(players),"Choose a patient...")+inp("atype","Appointment type","Surgery Follow Up")+inp("adate","Date","","date")+inp("atime","Time","","time")+btn("sched","Schedule")+E()+'</div><div class="card"><h2>Scheduled appointments</h2>'+(sc.length?sc.map(x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">'+fmt(x.ts)+'</div><div class="pair"><button data-a="aok" data-id="'+x.id+'">Attended</button><button class="gray" data-a="amiss" data-id="'+x.id+'">Missed (+50 fee)</button></div></div></div>').join(""):'<p class="mute">Nothing scheduled.</p>')+'</div>'+dadm+btn("exit","Exit staff view","","gray");
+ }else if(!players[me]){
+  const ex=Object.keys(players);
+  h='<div class="card"><h2>Sign in</h2>'+(ex.length?sel(ex,"Choose your name...","pick")+btn("pick","Open my portal"):'<p class="mute">No patients yet.</p>')+E()+'<p class="mute">New patient? <a href="index.html">Join Storyland Bank</a> first, then come back.</p></div>';
+ }else{
+  const now=Date.now(),my=appts.filter(x=>x.patient===me).sort((x,y)=>x.ts-y.ts),up=my.filter(x=>x.status==="scheduled"&&x.ts>=now-10800000),past=my.filter(x=>!up.includes(x)).reverse(),due=bills.filter(r=>r.to===me&&r.status==="pending"),owed=due.reduce((t,r)=>t+r.amount+late(r),0);
+  const welcome='<div class="card"><h2>Welcome, '+esc(nm(me))+'</h2><p class="mute" style="margin:0">Your appointments and balance with Dr. Moth Hill Surgical Practice.</p></div>'+
+  '<div class="card"><h2>Upcoming appointments</h2>'+(up.length?up.map(x=>{const td=new Date(x.ts).toDateString()===new Date().toDateString();return '<div class="row"><div>'+(td?'<span class="tag">TODAY</span> ':'')+'<b>'+esc(x.type)+'</b><div class="mute">'+fmt(x.ts)+' &middot; '+esc(x.surgeon)+'</div></div><button class="sm gray" data-a="acx" data-id="'+x.id+'">Cancel</button></div>'}).join(""):'<p class="mute">No upcoming appointments.</p>')+'<p class="mute">Please arrive a few minutes early. Missed appointments without notice are charged a $50 fee.</p></div>'+
+  '<div class="card"><h2>Balance due: '+owed+' Storyland Bucks</h2>'+(due.length?due.map(r=>'<div class="row"><div>'+esc(r.note||"Bill")+'<div class="mute">'+(late(r)?'Overdue, includes late fee':'From '+esc(nm(r.from)))+'</div></div><button class="sm" data-a="pay" data-id="'+r.id+'">Pay '+(r.amount+late(r))+'</button></div>').join(""):'<p class="mute">You are all paid up.</p>')+E()+'<p class="mute">Payments come from your Storyland Bank account.</p></div>'+
+  '<div class="card"><h2>Past visits</h2>'+(past.length?past.map(x=>'<div class="row"><div>'+esc(x.type)+'<div class="mute">'+new Date(x.ts).toLocaleDateString()+'</div></div><span class="'+(x.status==="missed"?"bad":"mute")+'">'+esc(x.status)+'</span></div>').join(""):'<p class="mute">No past visits.</p>')+'</div>';
+  const foot='<p style="text-align:center;margin-top:16px"><a href="index.html">Open Storyland Bank</a> &middot; <a href="#" data-a="out">Not you? Sign out</a></p>';
+  const mydocs=docs.filter(x=>x.patient===me).sort((x,y)=>y.ts-x.ts),myreq=reqs.filter(x=>x.patient===me).sort((x,y)=>y.created-x.created);
+  const nav='<div class="nav">'+[["home","Home"],["docs","Documents"],["req","Request visit"]].map(t=>'<button data-a="tab" data-id="'+t[0]+'"'+(tab===t[0]?' class="on"':'')+'>'+t[1]+'</button>').join("")+'</div>';
+  const docsH='<div class="card"><h2>My documents</h2>'+(mydocs.length?mydocs.map(x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+(x.status==="signed"?'Signed'+(x.signedBy?' by '+esc(x.signedBy):'')+(x.signedTs?' on '+new Date(x.signedTs).toLocaleDateString():''):'Waiting for your signature')+'</div></div><div style="display:flex;gap:6px;align-items:center">'+(x.file?'<a href="'+esc(x.file)+'" target="_blank">View</a>':'')+(x.status!=="signed"?'<button class="sm" data-a="sign" data-id="'+x.id+'">Sign</button>':'')+'</div></div>').join(""):'<p class="mute">No documents yet.</p>')+E()+'</div>';
+  const reqH='<div class="card"><h2>Request an appointment</h2><p class="mute" style="margin:0">Send a request to the office of Dr. Moth Hill. You will see the answer here.</p>'+inp("rtype","Appointment type","Surgery Follow Up")+inp("rdate","Preferred date","","date")+inp("rtime","Preferred time","","time")+inp("rnote","Notes (optional)","Anything we should know")+btn("reqsend","Send request")+E()+'</div><div class="card"><h2>My requests</h2>'+(myreq.length?myreq.map(x=>'<div class="row"><div><b>'+esc(x.type)+'</b><div class="mute">'+fmt(x.ts)+'</div></div><span class="'+(x.status==="declined"?"bad":"mute")+'">'+esc(x.status)+'</span>'+(x.status==="pending"?'<button class="sm gray" data-a="rcx" data-id="'+x.id+'">Cancel</button>':'')+'</div>').join(""):'<p class="mute">No requests yet.</p>')+'</div>';
+  h=nav+(tab==="docs"?docsH:tab==="req"?reqH:welcome)+foot;
+ }
+ if(!staff)h+=askpin?'<div class="card"><h2>Staff sign-in</h2>'+inp("pin","Staff PIN","","password")+btn("unlock","Unlock")+E()+'</div>':'<p style="text-align:center;margin-top:18px"><a href="#" data-a="askpin" class="mute">Staff sign-in</a></p>';
+ a.innerHTML=h;
+}
+const app=$("#app");
+app.addEventListener("click",e=>{const b=e.target.closest("[data-a]");if(!b)return;e.preventDefault();const f=act[b.dataset.a];if(f)f(b.dataset)});
+app.addEventListener("input",e=>{if(e.target.id)draft[e.target.id]=e.target.value});
+(()=>{
+ try{
+  if(String(FIREBASE_CONFIG.apiKey).startsWith("PASTE")){app.innerHTML='<div class="card">Paste your Firebase config first.</div>';return}
+  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.firestore();
+  const bad=e=>{err=e.message||"Database error";render()};
+  db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
+  db.collection("transfers").onSnapshot(q=>{tx=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  db.collection("requests").onSnapshot(q=>{bills=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  db.collection("appointments").onSnapshot(q=>{appts=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  db.collection("documents").onSnapshot(q=>{docs=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  db.collection("apptRequests").onSnapshot(q=>{reqs=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+ }catch(e){err=e.message;render()}
+})();
+</script></body></html>
