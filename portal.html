@@ -21,64 +21,112 @@ button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;backgr
 .sm{width:auto;margin:0;padding:8px 12px;font-size:14px}.gray{background:var(--line)!important;color:var(--ink)!important}
 .pair{display:flex;gap:8px}.pair button{margin-top:8px;padding:9px}
 .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--pri);color:#fff}
-.nav{display:flex;gap:6px;margin-top:14px}.nav button{margin:0;padding:9px 6px;font-size:14px;background:var(--line);color:var(--ink)}.nav .on{background:var(--pri);color:#fff}
+.nav{display:flex;gap:6px;margin-top:14px}.nav button{margin:0;padding:9px 4px;font-size:13px;background:var(--line);color:var(--ink)}.nav .on{background:var(--pri);color:#fff}
+.msg{background:var(--line);padding:9px 12px;border-radius:12px;max-width:85%;margin:6px 0;word-wrap:break-word}.msg.me{background:var(--pri);color:#fff;margin-left:auto}
 a{color:var(--pri);font-weight:700}
 </style></head><body>
 <header><small>Dr. Moth Hill Surgical Practice</small><h1>Patient Portal</h1></header>
 <div id="app"><p class="mute" style="text-align:center">Loading...</p></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4.4.1/dist/email.min.js"></script>
 <script>
 const FIREBASE_CONFIG={apiKey:"AIzaSyDcD7tNneEY23R8yPtY9aBXMWIDmxX0SX0",authDomain:"storyland-bank-b0400.firebaseapp.com",projectId:"storyland-bank-b0400",storageBucket:"storyland-bank-b0400.firebasestorage.app",messagingSenderId:"761721226563",appId:"1:761721226563:web:2d7a410e64b18ffef91bf6"};
-const ADMIN_PIN="1234",START=1000,OD=100,ODFEE=25;
-const STD=[["Patient Care Continuation Agreement","Patient_Care_Continuation_Agreement.pdf"],["Follow-Up Patient Intake Form","1_Follow_Up_Intake_Form.pdf"],["Medical POA Reestablishment","2_Medical_POA_Reestablishment.pdf"],["Consent to Bill Insurance","3_Consent_to_Bill_Insurance.pdf"]];
-let db,loaded=false,me=localStorage.getItem("sb_me"),staff=false,askpin=false,players={},tx=[],bills=[],appts=[],docs=[],reqs=[],tab="home",err="",draft={};
+const ADMIN_PIN="9311",START=1000,OD=100,ODFEE=25;
+const STD=[["Patient Care Continuation Agreement","Patient_Care_Continuation_Agreement.pdf","Intake & consent"],["Follow-Up Patient Intake Form","1_Follow_Up_Intake_Form.pdf","Intake & consent"],["Medical POA Reestablishment","2_Medical_POA_Reestablishment.pdf","Legal (POA)"],["Consent to Bill Insurance","3_Consent_to_Bill_Insurance.pdf","Insurance"]];
+const CATS=["Intake & consent","Insurance","Legal (POA)","Clinical","Patient uploads","Other"];
+// ===== EMAIL NOTIFICATIONS (EmailJS): paste your three values, or leave as is to skip emails =====
+const EMAILJS={publicKey:"PASTE_PUBLIC_KEY",serviceId:"PASTE_SERVICE_ID",templateId:"PASTE_TEMPLATE_ID"};
+let db,loaded=false,me=localStorage.getItem("sb_me"),staff=false,askpin=false,players={},tx=[],bills=[],appts=[],docs=[],reqs=[],msgs=[],notes=[],stab="inbox",spat="",mode="login",info="",auth=null,tab="home",mpat="",picked=null,viewed={},err="",draft={};
 const $=s=>document.querySelector(s),esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const nm=id=>(players[id]&&players[id].name)||"Someone";
+const nm=id=>id==="bank"?"Dr. Moth Hill's office":(players[id]&&players[id].name)||"Someone";
 const bal=id=>tx.reduce((s,t)=>s+(t.to===id?t.amount:0)-(t.from===id?t.amount:0),START);
 const late=r=>r.due&&Date.now()>r.due?Math.max(5,Math.round(r.amount*.1)):0;
 const add=(from,to,amount,note,kind)=>db.collection("transfers").add({from,to,amount,note:note||"",kind:kind||"transfer",ts:Date.now()});
-const run=async f=>{err="";try{await f()}catch(e){err=e.message||e.code||"Something went wrong"}render()};
-const inp=(id,l,p,t)=>'<label>'+l+'</label><input id="'+id+'" type="'+(t||"text")+'" maxlength="60" placeholder="'+(p||"")+'" value="'+esc(draft[id])+'">';
+const fe=e=>{const c=e.code||"";return c.includes("invalid-credential")||c.includes("wrong-password")||c.includes("user-not-found")?"Email or password is incorrect.":c.includes("email-already")?"That email already has an account. Try signing in.":c.includes("weak-password")?"Choose a password with at least 6 characters.":c.includes("invalid-email")?"That email address does not look right.":c.includes("operation-not-allowed")?"Email sign-in is not turned on in Firebase yet.":c.includes("too-many")?"Too many tries. Wait a minute and try again.":(e.message||c||"Something went wrong")};
+const run=async f=>{err="";info="";try{await f()}catch(e){err=fe(e)}render()};
+const notify=async(pid,subject,message)=>{const p=players[pid];if(!p||!p.email||String(EMAILJS.publicKey).startsWith("PASTE")||!window.emailjs)return"skipped";try{await emailjs.send(EMAILJS.serviceId,EMAILJS.templateId,{to_email:p.email,to_name:p.name,subject,message:message+" Sign in to your patient portal: "+location.href.split("#")[0]},{publicKey:EMAILJS.publicKey});return"sent"}catch(e){return"failed"}};
+const mail=async(pid,subject,msg)=>{const r=await notify(pid,subject,msg);info=r==="sent"?"Saved. Email sent to the patient.":r==="failed"?"Saved, but the email could not be sent.":(players[pid]&&players[pid].email?"Saved. Email notifications are not set up yet.":"Saved. This patient has no email on file.")};
+const inp=(id,l,p,t)=>'<label>'+l+'</label><input id="'+id+'" type="'+(t||"text")+'" maxlength="500" placeholder="'+(p||"")+'" value="'+esc(draft[id])+'">';
 const sel=(ids,ph,id)=>'<select id="'+(id||"to")+'"><option value="">'+ph+'</option>'+ids.map(i=>'<option value="'+i+'"'+(draft[id||"to"]===i?" selected":"")+'>'+esc(nm(i))+'</option>').join("")+'</select>';
 const btn=(a,l,id,c)=>'<button data-a="'+a+'"'+(id?' data-id="'+id+'"':'')+(c?' class="'+c+'"':'')+'>'+l+'</button>';
-const E=()=>err?'<div class="err">'+esc(err)+'</div>':"";
+const fileInp=id=>'<label>File (PDF or photo)</label><input id="'+id+'" type="file" accept=".pdf,image/*">'+(picked?'<div class="mute">Selected: '+esc(picked.name)+'</div>':'');
+const E=()=>(err?'<div class="err">'+esc(err)+'</div>':"")+(info?'<div class="mute" style="margin-top:8px">'+esc(info)+'</div>':"");
 const fmt=t=>new Date(t).toLocaleString([],{dateStyle:"medium",timeStyle:"short"});
+const hasF=x=>x.file||x.fileId;
+const readFile=f=>new Promise((res,rej)=>{
+ if(f.type.startsWith("image/")){const img=new Image();img.onload=()=>{const k=Math.min(1,1400/Math.max(img.width,img.height)),c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);let q=.8,d=c.toDataURL("image/jpeg",q);while(d.length>900000&&q>.3){q-=.1;d=c.toDataURL("image/jpeg",q)}res({data:d,type:"image/jpeg",name:f.name})};img.onerror=()=>rej(Error("Could not read that image."));img.src=URL.createObjectURL(f);return}
+ if(f.size>650000)return rej(Error("That file is too big. Keep PDFs under about 650 KB, or upload a photo instead."));
+ const r=new FileReader();r.onload=()=>res({data:r.result,type:f.type||"application/octet-stream",name:f.name});r.onerror=()=>rej(Error("Could not read that file."));r.readAsDataURL(f)});
+const thread=(id,me2)=>msgs.filter(m=>m.patient===id).sort((a,b)=>a.ts-b.ts).map(m=>'<div class="msg'+((m.from===me2)?' me':'')+'">'+esc(m.text)+'<div class="mute" style="color:inherit;opacity:.7;font-size:11px">'+fmt(m.ts)+'</div></div>').join("")||'<p class="mute">No messages yet.</p>';
 const act={
  pick:()=>{if(!draft.pick)return;me=draft.pick;localStorage.setItem("sb_me",me);draft={};render()},
- out:()=>{me=null;localStorage.removeItem("sb_me");render()},
+ out:()=>{if(auth)auth.signOut().catch(()=>{});me=null;localStorage.removeItem("sb_me");render()},
+ mode:d=>{mode=d.id;err="";info="";render()},
+ reg:()=>run(async()=>{const n=(draft.rname||"").trim(),em=(draft.remail||"").trim(),pw=draft.rpass||"";if(!n||!em||pw.length<6)throw Error("Enter your name, your email, and a password of at least 6 characters.");const c=await auth.createUserWithEmailAndPassword(em,pw);me=c.user.uid;await db.doc("players/"+me).set({name:n,email:em});localStorage.setItem("sb_me",me);draft={}}),
+ login:()=>run(async()=>{const c=await auth.signInWithEmailAndPassword((draft.remail||"").trim(),draft.rpass||"");me=c.user.uid;localStorage.setItem("sb_me",me);draft={}}),
+ reset:()=>run(async()=>{const em=(draft.remail||"").trim();if(!em)throw Error("Enter your email above first.");await auth.sendPasswordResetEmail(em);info="Password reset email sent. Check your inbox."}),
+ stab:d=>{stab=d.id;spat="";mpat="";draft={};err="";info="";render()},
+ popen:d=>{spat=d.id;draft={};picked=null;err="";info="";render()},
+ pback:()=>{spat="";draft={};err="";info="";render()},
+ psave:()=>run(async()=>{await db.doc("players/"+spat).update({dob:draft.pdob||"",phone:draft.pphone||"",emerg:draft.pemerg||"",allergy:draft.pallergy||"",ins:draft.pins||"",grp:draft.pgrp||""});info="Patient info saved."}),
+ nadd:()=>run(async()=>{const t=(draft.ntext||"").trim();if(!t)return;await db.collection("notes").add({patient:spat,text:t,ts:Date.now()});draft.ntext=""}),
+ bsend:()=>run(async()=>{const a=Math.floor(+draft.bamt);if(!(a>0))throw Error("Enter a bill amount above 0.");const n=(draft.bnote||"").trim()||"Bill",due=draft.bdue?new Date(draft.bdue+"T23:59:59").getTime():null;await db.collection("requests").add({from:"bank",to:spat,amount:a,note:n,due,status:"pending",ts:Date.now()});draft.bamt=draft.bnote=draft.bdue="";await mail(spat,"A new bill is due","Hello "+nm(spat)+", a new bill of "+a+" Storyland Bucks is due: "+n+(due?" (due "+new Date(due).toLocaleDateString()+")":"")+".")}),
+ tab:d=>{tab=d.id;err="";render()},
  acx:d=>run(()=>db.doc("appointments/"+d.id).update({status:"canceled"})),
  pay:d=>run(async()=>{const r=bills.find(x=>x.id===d.id),t=r.amount+late(r),b=bal(me);if(b-t<-OD)throw Error("Not enough Storyland Bucks. Visit the bank to add funds.");await add(me,r.from,t,r.note||"Bill paid","bill");await db.doc("requests/"+r.id).update({status:"paid"});if(b-t<0)await add(me,"bank",ODFEE,"Overdraft fee","fee")}),
- tab:d=>{tab=d.id;err="";render()},
+ askpin:()=>{askpin=true;render()},
+ unlock:()=>run(async()=>{if(draft.pin!==ADMIN_PIN)throw Error("Wrong passcode.");staff=true;askpin=false;draft={}}),
+ exit:()=>{staff=false;askpin=false;draft={};mpat="";render()},
+ sched:()=>run(async()=>{const pid=spat||draft.to;if(!pid||!draft.adate||!draft.atime)throw Error("Choose a date and time.");const ts=new Date(draft.adate+"T"+draft.atime).getTime(),ty=(draft.atype||"Appointment").trim();await db.collection("appointments").add({patient:pid,type:ty,surgeon:"Dr. Moth Hill",ts,status:"scheduled"});draft.adate=draft.atime=draft.atype="";await mail(pid,"Your appointment is scheduled","Hello "+nm(pid)+", your "+ty+" with Dr. Moth Hill is scheduled for "+fmt(ts)+". Please arrive a few minutes early.")}),
+ aok:d=>run(()=>db.doc("appointments/"+d.id).update({status:"completed"})),
+ amiss:d=>run(async()=>{const a=appts.find(x=>x.id===d.id);await db.doc("appointments/"+d.id).update({status:"missed"});await add(a.patient,"bank",50,"Missed appointment fee","fee")}),
  reqsend:()=>run(async()=>{if(!draft.rdate||!draft.rtime)throw Error("Choose a preferred date and time.");await db.collection("apptRequests").add({patient:me,type:(draft.rtype||"Appointment").trim(),ts:new Date(draft.rdate+"T"+draft.rtime).getTime(),note:(draft.rnote||"").trim(),status:"pending",created:Date.now()});draft={}}),
  rcx:d=>run(()=>db.doc("apptRequests/"+d.id).update({status:"canceled"})),
- rapprove:d=>run(async()=>{const r=reqs.find(x=>x.id===d.id);await db.collection("appointments").add({patient:r.patient,type:r.type,surgeon:"Dr. Moth Hill",ts:r.ts,status:"scheduled"});await db.doc("apptRequests/"+r.id).update({status:"approved"})}),
+ rapprove:d=>run(async()=>{const r=reqs.find(x=>x.id===d.id);await db.collection("appointments").add({patient:r.patient,type:r.type,surgeon:"Dr. Moth Hill",ts:r.ts,status:"scheduled"});await db.doc("apptRequests/"+r.id).update({status:"approved"});await mail(r.patient,"Your appointment request was approved","Hello "+nm(r.patient)+", your "+r.type+" with Dr. Moth Hill is confirmed for "+fmt(r.ts)+".")}),
  rdecline:d=>run(()=>db.doc("apptRequests/"+d.id).update({status:"declined"})),
+ view:d=>{const x=docs.find(y=>y.id===d.id);if(!x)return;viewed[x.id]=true;
+  if(x.fileId){const w=window.open("","_blank");db.collection("files").doc(x.fileId).get().then(s=>{const f=s.data(),b=atob(f.data.split(",")[1]),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);const url=URL.createObjectURL(new Blob([u],{type:f.type}));if(w)w.location.href=url;else location.href=url}).catch(e=>{err=e.message;if(w)w.close();render()})}
+  else if(x.file)window.open(x.file,"_blank");
+  render()},
  sign:d=>run(async()=>{const n=(prompt("Type your full name to sign this document")||"").trim();if(!n)return;await db.doc("documents/"+d.id).update({status:"signed",signedBy:n,signedTs:Date.now()})}),
- adddoc:()=>run(async()=>{if(!draft.to||!draft.dtitle)throw Error("Choose a patient and enter a title.");await db.collection("documents").add({patient:draft.to,title:draft.dtitle.trim(),file:(draft.dfile||"").trim(),status:draft.dstat||"pending",signedTs:draft.dstat==="signed"?Date.now():null,ts:Date.now()});draft={}}),
- stdforms:()=>run(async()=>{if(!draft.to)throw Error("Choose a patient first.");for(const f of STD)await db.collection("documents").add({patient:draft.to,title:f[0],file:f[1],status:"pending",signedTs:null,ts:Date.now()})}),
+ upload:()=>run(async()=>{if(!picked)throw Error("Choose a file first.");const t=(draft.utitle||"").trim()||picked.name,r=await db.collection("files").add(await readFile(picked));await db.collection("documents").add({patient:me,title:t,fileId:r.id,status:"uploaded",by:"patient",cat:"Patient uploads",ts:Date.now()});picked=null;draft={}}),
+ adddoc:()=>run(async()=>{const pid=spat;if(!pid||!draft.dtitle)throw Error("Enter a title for the document.");let fileId=null;if(picked)fileId=(await db.collection("files").add(await readFile(picked))).id;const st=draft.dstat||"pending";await db.collection("documents").add({patient:pid,title:draft.dtitle.trim(),file:(draft.dfile||"").trim(),fileId,status:st,by:"staff",cat:draft.dcat||"Intake & consent",signedBy:st==="signed"?"Signed in office":null,signedTs:st==="signed"?Date.now():null,ts:Date.now()});picked=null;draft.dtitle=draft.dfile="";info="Document added."}),
+ stdforms:()=>run(async()=>{for(const f of STD)await db.collection("documents").add({patient:spat,title:f[0],file:f[1],fileId:null,status:"pending",by:"staff",cat:f[2],signedTs:null,ts:Date.now()});info="Standard forms added."}),
  dmark:d=>run(()=>db.doc("documents/"+d.id).update({status:"signed",signedBy:"Signed in office",signedTs:Date.now()})),
- ddel:d=>run(()=>db.doc("documents/"+d.id).delete()),
- askpin:()=>{askpin=true;render()},
- unlock:()=>run(async()=>{if(draft.pin!==ADMIN_PIN)throw Error("Wrong PIN.");staff=true;askpin=false;draft={}}),
- exit:()=>{staff=false;askpin=false;draft={};render()},
- sched:()=>run(async()=>{if(!draft.to||!draft.adate||!draft.atime)throw Error("Choose a patient, date, and time.");await db.collection("appointments").add({patient:draft.to,type:(draft.atype||"Appointment").trim(),surgeon:"Dr. Moth Hill",ts:new Date(draft.adate+"T"+draft.atime).getTime(),status:"scheduled"});draft={}}),
- aok:d=>run(()=>db.doc("appointments/"+d.id).update({status:"completed"})),
- amiss:d=>run(async()=>{const a=appts.find(x=>x.id===d.id);await db.doc("appointments/"+d.id).update({status:"missed"});await add(a.patient,"bank",50,"Missed appointment fee","fee")})
+ ddel:d=>run(async()=>{const x=docs.find(y=>y.id===d.id);if(x&&x.fileId)await db.doc("files/"+x.fileId).delete();await db.doc("documents/"+d.id).delete()}),
+ msend:()=>run(async()=>{const t=(draft.mtext||"").trim();if(!t)return;await db.collection("messages").add({patient:me,from:"patient",text:t,ts:Date.now()});draft={}}),
+ mopen:d=>{mpat=d.id;draft={};render()},mclose:()=>{mpat="";render()},
+ mreply:()=>run(async()=>{const t=(draft.mreply||"").trim(),pid=spat||mpat;if(!t)return;await db.collection("messages").add({patient:pid,from:"staff",text:t,ts:Date.now()});draft.mreply=""})
 };
+const drow=x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+(x.status==="signed"?"Signed"+(x.signedBy?" by "+esc(x.signedBy):""):x.status==="uploaded"?"Uploaded by patient":"Waiting for signature")+'</div></div><div style="display:flex;gap:6px">'+(hasF(x)?'<button class="sm gray" data-a="view" data-id="'+x.id+'">View</button>':'')+(x.status==="pending"?'<button class="sm" data-a="dmark" data-id="'+x.id+'">Signed</button>':'')+'<button class="sm gray" data-a="ddel" data-id="'+x.id+'">Remove</button></div></div>';
+const lastMsg=id=>msgs.filter(m=>m.patient===id).sort((x,y)=>y.ts-x.ts)[0];
+const apRow=x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">'+fmt(x.ts)+' &middot; '+esc(x.status)+'</div>'+(x.status==="scheduled"?'<div class="pair"><button data-a="aok" data-id="'+x.id+'">Attended</button><button class="gray" data-a="amiss" data-id="'+x.id+'">Missed (+50 fee)</button></div>':'')+'</div></div>';
+const inboxH=()=>{const rq=reqs.filter(x=>x.status==="pending").sort((x,y)=>x.created-y.created),sc=appts.filter(x=>x.status==="scheduled").sort((x,y)=>x.ts-y.ts),pids=[...new Set(msgs.map(m=>m.patient))].sort((x,y)=>lastMsg(y).ts-lastMsg(x).ts),nr=pids.filter(id=>lastMsg(id).from==="patient").length;
+ return '<div class="card"><h2>Appointment requests'+(rq.length?' ('+rq.length+')':'')+'</h2>'+(rq.length?rq.map(x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">Wants '+fmt(x.ts)+(x.note?' &middot; '+esc(x.note):'')+'</div><div class="pair"><button data-a="rapprove" data-id="'+x.id+'">Approve</button><button class="gray" data-a="rdecline" data-id="'+x.id+'">Decline</button></div></div></div>').join(""):'<p class="mute">No new requests.</p>')+E()+'</div>'+
+ '<div class="card"><h2>Messages'+(nr?' ('+nr+' to answer)':'')+'</h2>'+(mpat?'<b>'+esc(nm(mpat))+'</b>'+thread(mpat,"staff")+inp("mreply","Reply","Type your reply")+'<div class="pair">'+btn("mreply","Send reply")+btn("mclose","Close","","gray")+'</div>':(pids.length?pids.map(id=>{const l=lastMsg(id);return '<div class="row" data-a="mopen" data-id="'+id+'" style="cursor:pointer"><div><b>'+esc(nm(id))+'</b>'+(l.from==="patient"?' <span class="tag">Needs reply</span>':'')+'<div class="mute">'+esc(l.text.slice(0,50))+'</div></div><span class="mute">'+new Date(l.ts).toLocaleDateString()+'</span></div>'}).join(""):'<p class="mute">No messages yet.</p>'))+'</div>'+
+ '<div class="card"><h2>Upcoming appointments</h2>'+(sc.length?sc.map(apRow).join(""):'<p class="mute">Nothing scheduled.</p>')+'</div>'};
+const plist=()=>{const ids=Object.keys(players).sort((x,y)=>nm(x).localeCompare(nm(y)));return '<div class="card"><h2>Patients ('+ids.length+')</h2>'+(ids.length?ids.map(id=>{const l=lastMsg(id);return '<div class="row" data-a="popen" data-id="'+id+'" style="cursor:pointer"><div><b>'+esc(nm(id))+'</b>'+(l&&l.from==="patient"?' <span class="tag">Needs reply</span>':'')+'<div class="mute">'+esc((players[id]||{}).email||"No email on file")+' &middot; '+docs.filter(x=>x.patient===id).length+' documents</div></div><span class="mute">Open</span></div>'}).join(""):'<p class="mute">No patients yet.</p>')+'</div>'};
+const chart=id=>{const p=players[id]||{};[["pdob","dob"],["pphone","phone"],["pemerg","emerg"],["pallergy","allergy"],["pins","ins"],["pgrp","grp"]].forEach(k=>{if(draft[k[0]]===undefined)draft[k[0]]=p[k[1]]||""});
+ const d=docs.filter(x=>x.patient===id),ap=appts.filter(x=>x.patient===id).sort((x,y)=>y.ts-x.ts),bl=bills.filter(x=>x.to===id).sort((x,y)=>y.ts-x.ts),nt=notes.filter(x=>x.patient===id).sort((x,y)=>y.ts-x.ts);
+ const dl=CATS.map(c=>{const l=d.filter(x=>(x.cat||(x.by==="patient"?"Patient uploads":"Other"))===c);return l.length?'<div class="mute" style="margin-top:10px;font-weight:700">'+esc(c)+' ('+l.length+')</div>'+l.sort((x,y)=>y.ts-x.ts).map(drow).join(""):""}).join("");
+ return btn("pback","Back to patients","","gray")+'<div class="card"><h2>'+esc(p.name)+'</h2><div class="mute">'+esc(p.email||"No email on file")+'</div>'+inp("pdob","Date of birth","","date")+inp("pphone","Phone","555-0100")+inp("pemerg","Emergency contact","Name and phone")+inp("pallergy","Allergies","None known")+inp("pins","Insurance member ID","12345678")+inp("pgrp","Group number","120794")+btn("psave","Save patient info")+E()+'</div>'+
+ '<div class="card"><h2>Documents ('+d.length+')</h2>'+(dl||'<p class="mute">No documents yet.</p>')+'</div>'+
+ '<div class="card"><h2>Add or upload a document</h2>'+inp("dtitle","Title","Consent to Bill Insurance")+fileInp("ufile")+inp("dfile","Or a file name already on the website (optional)","3_Consent_to_Bill_Insurance.pdf")+'<label>Category</label><select id="dcat">'+CATS.map(c=>'<option'+((draft.dcat||"Intake & consent")===c?' selected':'')+'>'+esc(c)+'</option>').join("")+'</select><label>Status</label><select id="dstat"><option value="pending"'+(draft.dstat==="signed"?'':' selected')+'>Waiting for signature</option><option value="signed"'+(draft.dstat==="signed"?' selected':'')+'>Already signed</option></select>'+btn("adddoc","Add document")+btn("stdforms","Add the 4 standard forms","","gray")+'</div>'+
+ '<div class="card"><h2>Clinical notes</h2>'+inp("ntext","New note","Observation, instruction, follow-up")+btn("nadd","Save note")+nt.map(x=>'<div class="row"><div>'+esc(x.text)+'<div class="mute">'+fmt(x.ts)+'</div></div></div>').join("")+'</div>'+
+ '<div class="card"><h2>Visits ('+ap.length+')</h2>'+(ap.length?ap.map(apRow).join(""):'<p class="mute">No visits yet.</p>')+inp("atype","Schedule a visit: type","Surgery Follow Up")+inp("adate","Date","","date")+inp("atime","Time","","time")+btn("sched","Schedule and email patient")+'</div>'+
+ '<div class="card"><h2>Billing</h2>'+bl.map(x=>'<div class="row"><div>'+esc(x.note||"Bill")+' &middot; '+x.amount+' SB<div class="mute">'+(x.due?'Due '+new Date(x.due).toLocaleDateString()+' &middot; ':'')+esc(x.status)+'</div></div></div>').join("")+inp("bamt","Send a bill: amount","0","number")+inp("bnote","Description","Missed appointment fee")+inp("bdue","Due date (optional)","","date")+btn("bsend","Send bill and email patient")+'</div>'+
+ '<div class="card"><h2>Messages</h2>'+thread(id,"staff")+inp("mreply","Reply","Type your reply")+btn("mreply","Send reply")+'</div>'};
 function render(){
  const a=$("#app");
  if(!db||!loaded){a.innerHTML='<p class="mute" style="text-align:center">Connecting...</p>'+E();return}
  let h="";
  if(staff){
-  const sc=appts.filter(x=>x.status==="scheduled").sort((x,y)=>x.ts-y.ts);
-  const rq=reqs.filter(x=>x.status==="pending").sort((x,y)=>x.created-y.created);
-  const inbox='<div class="card"><h2>Appointment requests'+(rq.length?' ('+rq.length+')':'')+'</h2>'+(rq.length?rq.map(x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">Wants '+fmt(x.ts)+(x.note?' &middot; '+esc(x.note):'')+'</div><div class="pair"><button data-a="rapprove" data-id="'+x.id+'">Approve</button><button class="gray" data-a="rdecline" data-id="'+x.id+'">Decline</button></div></div></div>').join(""):'<p class="mute">No new requests.</p>')+'</div>';
-  const dadm='<div class="card"><h2>Add a document</h2>'+sel(Object.keys(players),"Choose a patient...")+inp("dtitle","Title","Consent to Bill Insurance")+inp("dfile","File name in website folder","3_Consent_to_Bill_Insurance.pdf")+'<label>Status</label><select id="dstat"><option value="pending"'+(draft.dstat==="signed"?'':' selected')+'>Waiting for signature</option><option value="signed"'+(draft.dstat==="signed"?' selected':'')+'>Already signed</option></select>'+btn("adddoc","Add document")+btn("stdforms","Add the 4 standard forms","","gray")+E()+'</div><div class="card"><h2>All documents</h2>'+(docs.length?docs.slice().sort((x,y)=>y.ts-x.ts).map(x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+esc(nm(x.patient))+' &middot; '+(x.status==="signed"?"signed":"pending")+'</div></div><div style="display:flex;gap:6px">'+(x.status!=="signed"?'<button class="sm" data-a="dmark" data-id="'+x.id+'">Mark signed</button>':'')+'<button class="sm gray" data-a="ddel" data-id="'+x.id+'">Remove</button></div></div>').join(""):'<p class="mute">No documents yet.</p>')+'</div>';
-  h=inbox+'<div class="card"><h2>Staff: schedule an appointment</h2>'+sel(Object.keys(players),"Choose a patient...")+inp("atype","Appointment type","Surgery Follow Up")+inp("adate","Date","","date")+inp("atime","Time","","time")+btn("sched","Schedule")+E()+'</div><div class="card"><h2>Scheduled appointments</h2>'+(sc.length?sc.map(x=>'<div class="row"><div><b>'+esc(nm(x.patient))+'</b> &middot; '+esc(x.type)+'<div class="mute">'+fmt(x.ts)+'</div><div class="pair"><button data-a="aok" data-id="'+x.id+'">Attended</button><button class="gray" data-a="amiss" data-id="'+x.id+'">Missed (+50 fee)</button></div></div></div>').join(""):'<p class="mute">Nothing scheduled.</p>')+'</div>'+dadm+btn("exit","Exit staff view","","gray");
+   h='<div class="nav">'+[["inbox","Inbox"],["patients","Patients"]].map(t=>'<button data-a="stab" data-id="'+t[0]+'"'+(stab===t[0]?' class="on"':'')+'>'+t[1]+'</button>').join("")+'</div>'+(stab==="patients"?(spat?chart(spat):plist()):inboxH())+btn("exit","Exit staff view","","gray");
  }else if(!players[me]){
-  const ex=Object.keys(players);
-  h='<div class="card"><h2>Sign in</h2>'+(ex.length?sel(ex,"Choose your name...","pick")+btn("pick","Open my portal"):'<p class="mute">No patients yet.</p>')+E()+'<p class="mute">New patient? <a href="index.html">Join Storyland Bank</a> first, then come back.</p></div>';
+  const reg=mode==="register",lg=Object.keys(players).filter(id=>!players[id].email);
+  h='<div class="card"><h2>'+(reg?"Create your account":"Sign in")+'</h2>'+(reg?inp("rname","Full name","Your full name"):"")+inp("remail","Email","you@example.com","email")+inp("rpass","Password","At least 6 characters","password")+btn(reg?"reg":"login",reg?"Create account":"Sign in")+E()+'<p class="mute">'+(reg?'Already registered? <a href="#" data-a="mode" data-id="login">Sign in</a>':'New patient? <a href="#" data-a="mode" data-id="register">Create an account</a> &middot; <a href="#" data-a="reset">Forgot password</a>')+'</p>'+(lg.length?'<details style="margin-top:8px"><summary class="mute">Joined the bank without an email?</summary>'+sel(lg,"Choose your name...","pick")+btn("pick","Open my portal","","gray")+'</details>':'')+'</div>';
  }else{
   const now=Date.now(),my=appts.filter(x=>x.patient===me).sort((x,y)=>x.ts-y.ts),up=my.filter(x=>x.status==="scheduled"&&x.ts>=now-10800000),past=my.filter(x=>!up.includes(x)).reverse(),due=bills.filter(r=>r.to===me&&r.status==="pending"),owed=due.reduce((t,r)=>t+r.amount+late(r),0);
   const welcome='<div class="card"><h2>Welcome, '+esc(nm(me))+'</h2><p class="mute" style="margin:0">Your appointments and balance with Dr. Moth Hill Surgical Practice.</p></div>'+
@@ -87,28 +135,27 @@ function render(){
   '<div class="card"><h2>Past visits</h2>'+(past.length?past.map(x=>'<div class="row"><div>'+esc(x.type)+'<div class="mute">'+new Date(x.ts).toLocaleDateString()+'</div></div><span class="'+(x.status==="missed"?"bad":"mute")+'">'+esc(x.status)+'</span></div>').join(""):'<p class="mute">No past visits.</p>')+'</div>';
   const foot='<p style="text-align:center;margin-top:16px"><a href="index.html">Open Storyland Bank</a> &middot; <a href="#" data-a="out">Not you? Sign out</a></p>';
   const mydocs=docs.filter(x=>x.patient===me).sort((x,y)=>y.ts-x.ts),myreq=reqs.filter(x=>x.patient===me).sort((x,y)=>y.created-x.created);
-  const nav='<div class="nav">'+[["home","Home"],["docs","Documents"],["req","Request visit"]].map(t=>'<button data-a="tab" data-id="'+t[0]+'"'+(tab===t[0]?' class="on"':'')+'>'+t[1]+'</button>').join("")+'</div>';
-  const docsH='<div class="card"><h2>My documents</h2>'+(mydocs.length?mydocs.map(x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+(x.status==="signed"?'Signed'+(x.signedBy?' by '+esc(x.signedBy):'')+(x.signedTs?' on '+new Date(x.signedTs).toLocaleDateString():''):'Waiting for your signature')+'</div></div><div style="display:flex;gap:6px;align-items:center">'+(x.file?'<a href="'+esc(x.file)+'" target="_blank">View</a>':'')+(x.status!=="signed"?'<button class="sm" data-a="sign" data-id="'+x.id+'">Sign</button>':'')+'</div></div>').join(""):'<p class="mute">No documents yet.</p>')+E()+'</div>';
+  const nav='<div class="nav">'+[["home","Home"],["docs","Documents"],["req","Visit"],["msg","Messages"]].map(t=>'<button data-a="tab" data-id="'+t[0]+'"'+(tab===t[0]?' class="on"':'')+'>'+t[1]+'</button>').join("")+'</div>';
+  const docsH='<div class="card"><h2>My documents</h2>'+(mydocs.length?mydocs.map(x=>'<div class="row"><div><b>'+esc(x.title)+'</b><div class="mute">'+(x.status==="signed"?'Signed'+(x.signedBy?' by '+esc(x.signedBy):'')+(x.signedTs?' on '+new Date(x.signedTs).toLocaleDateString():''):x.status==="uploaded"?'Uploaded by you':'Waiting for your signature'+(hasF(x)&&!viewed[x.id]?'. Open it to read before signing.':''))+'</div></div><div style="display:flex;gap:6px;align-items:center">'+(hasF(x)?'<button class="sm gray" data-a="view" data-id="'+x.id+'">View</button>':'')+(x.status==="pending"&&(!hasF(x)||viewed[x.id])?'<button class="sm" data-a="sign" data-id="'+x.id+'">Sign</button>':'')+'</div></div>').join(""):'<p class="mute">No documents yet.</p>')+E()+'</div><div class="card"><h2>Upload a document</h2><p class="mute" style="margin:0">Send the office a PDF or photo, such as an insurance card or ID. PDFs must be under about 650 KB.</p>'+inp("utitle","Title","Insurance card")+fileInp("ufile")+btn("upload","Upload")+'</div>';
   const reqH='<div class="card"><h2>Request an appointment</h2><p class="mute" style="margin:0">Send a request to the office of Dr. Moth Hill. You will see the answer here.</p>'+inp("rtype","Appointment type","Surgery Follow Up")+inp("rdate","Preferred date","","date")+inp("rtime","Preferred time","","time")+inp("rnote","Notes (optional)","Anything we should know")+btn("reqsend","Send request")+E()+'</div><div class="card"><h2>My requests</h2>'+(myreq.length?myreq.map(x=>'<div class="row"><div><b>'+esc(x.type)+'</b><div class="mute">'+fmt(x.ts)+'</div></div><span class="'+(x.status==="declined"?"bad":"mute")+'">'+esc(x.status)+'</span>'+(x.status==="pending"?'<button class="sm gray" data-a="rcx" data-id="'+x.id+'">Cancel</button>':'')+'</div>').join(""):'<p class="mute">No requests yet.</p>')+'</div>';
-  h=nav+(tab==="docs"?docsH:tab==="req"?reqH:welcome)+foot;
+  const msgH='<div class="card"><h2>Messages with the office</h2>'+thread(me,"patient")+inp("mtext","New message","Type your message")+btn("msend","Send")+E()+'</div>';
+  h=nav+(tab==="docs"?docsH:tab==="req"?reqH:tab==="msg"?msgH:welcome)+foot;
  }
- if(!staff)h+=askpin?'<div class="card"><h2>Staff sign-in</h2>'+inp("pin","Staff PIN","","password")+btn("unlock","Unlock")+E()+'</div>':'<p style="text-align:center;margin-top:18px"><a href="#" data-a="askpin" class="mute">Staff sign-in</a></p>';
+ if(!staff)h+=askpin?'<div class="card"><h2>Staff sign-in</h2>'+inp("pin","Staff passcode","","password")+btn("unlock","Unlock")+E()+'</div>':'<p style="text-align:center;margin-top:18px"><a href="#" data-a="askpin" class="mute">Staff sign-in</a></p>';
  a.innerHTML=h;
 }
 const app=$("#app");
 app.addEventListener("click",e=>{const b=e.target.closest("[data-a]");if(!b)return;e.preventDefault();const f=act[b.dataset.a];if(f)f(b.dataset)});
-app.addEventListener("input",e=>{if(e.target.id)draft[e.target.id]=e.target.value});
+app.addEventListener("input",e=>{if(e.target.id&&e.target.type!=="file")draft[e.target.id]=e.target.value});
+app.addEventListener("change",e=>{if(e.target.type==="file"){picked=e.target.files[0]||null;render()}});
 (()=>{
  try{
   if(String(FIREBASE_CONFIG.apiKey).startsWith("PASTE")){app.innerHTML='<div class="card">Paste your Firebase config first.</div>';return}
-  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.firestore();
-  const bad=e=>{err=e.message||"Database error";render()};
+  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.firestore();auth=firebase.auth();auth.onAuthStateChanged(u=>{if(u){me=u.uid;localStorage.setItem("sb_me",me)}render()});
+  const bad=e=>{err=e.message||"Database error";render()},list=(c,f)=>db.collection(c).onSnapshot(q=>f(q.docs.map(d=>({id:d.id,...d.data()}))),bad);
   db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
-  db.collection("transfers").onSnapshot(q=>{tx=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
-  db.collection("requests").onSnapshot(q=>{bills=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
-  db.collection("appointments").onSnapshot(q=>{appts=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
-  db.collection("documents").onSnapshot(q=>{docs=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
-  db.collection("apptRequests").onSnapshot(q=>{reqs=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  list("transfers",v=>{tx=v;render()});list("requests",v=>{bills=v;render()});list("appointments",v=>{appts=v;render()});
+  list("documents",v=>{docs=v;render()});list("apptRequests",v=>{reqs=v;render()});list("messages",v=>{msgs=v;render()});list("notes",v=>{notes=v;render()});
  }catch(e){err=e.message;render()}
 })();
 </script></body></html>
