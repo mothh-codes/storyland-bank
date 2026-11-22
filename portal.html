@@ -37,7 +37,7 @@ const ADMIN_PIN="9311",START=1000,OD=100,ODFEE=25;
 const STD=[["Patient Care Continuation Agreement","Patient_Care_Continuation_Agreement.pdf","Intake & consent"],["Follow-Up Patient Intake Form","1_Follow_Up_Intake_Form.pdf","Intake & consent"],["Medical POA Reestablishment","2_Medical_POA_Reestablishment.pdf","Legal (POA)"],["Consent to Bill Insurance","3_Consent_to_Bill_Insurance.pdf","Insurance"]];
 const CATS=["Intake & consent","Insurance","Legal (POA)","Clinical","Patient uploads","Other"];
 // ===== EMAIL NOTIFICATIONS (EmailJS): paste your three values, or leave as is to skip emails =====
-const EMAILJS={publicKey:"PASTE_PUBLIC_KEY",serviceId:"PASTE_SERVICE_ID",templateId:"PASTE_TEMPLATE_ID"};
+const EMAILJS={publicKey:"wZbDa8XqCqHr5kNBN",serviceId:"service_g8z1sen",templateId:"template_zznlpab"};
 let db,loaded=false,me=localStorage.getItem("sb_me"),staff=false,askpin=false,players={},tx=[],bills=[],appts=[],docs=[],reqs=[],msgs=[],notes=[],stab="inbox",spat="",mode="login",info="",auth=null,tab="home",mpat="",picked=null,viewed={},err="",draft={};
 const $=s=>document.querySelector(s),esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const nm=id=>id==="bank"?"Dr. Moth Hill's office":(players[id]&&players[id].name)||"Someone";
