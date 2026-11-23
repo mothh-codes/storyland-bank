@@ -111,7 +111,7 @@ act.join=()=>run(async()=>{const n=(draft.name||"").trim();if(!n)throw Error("En
   const start=()=>{db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
   db.collection("transfers").onSnapshot(q=>{tx=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
   db.collection("requests").onSnapshot(q=>{bills=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);};
-  au.onAuthStateChanged(u=>{if(!u){au.signInAnonymously().catch(e=>{err="Anonymous sign-in is not turned on in Firebase yet. ("+(e.code||e.message)+")";render()});return}if(!started){started=true;start()}});
+  au.onAuthStateChanged(u=>{if(!u){au.signInAnonymously().catch(e=>{err="";if(!started){started=true;start()}render()});return}if(!started){started=true;start()}});
  }catch(e){err=e.message;render()}
 })();
 </script></body></html>

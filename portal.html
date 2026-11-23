@@ -258,7 +258,7 @@ app.addEventListener("change",e=>{if(e.target.type==="file"){picked=e.target.fil
   const start=()=>{db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
   list("transfers",v=>{tx=v;render()});list("requests",v=>{bills=v;render()});list("appointments",v=>{appts=v;render()});
   list("documents",v=>{docs=v;render()});list("apptRequests",v=>{reqs=v;render()});list("messages",v=>{msgs=v;render()});list("notes",v=>{notes=v;render()});list("formlib",v=>{lib=v;render()});list("encounters",v=>{encs=v;render()});list("previsits",v=>{pvs=v;render()});list("eforms",v=>{eforms=v;render()});};
-  auth.onAuthStateChanged(u=>{if(!u){auth.signInAnonymously().catch(e=>{err="Anonymous sign-in is not turned on in Firebase yet. ("+(e.code||e.message)+")";render()});return}if(!u.isAnonymous){me=u.uid;localStorage.setItem("sb_me",me)}if(!started){started=true;start()}render()});
+  auth.onAuthStateChanged(u=>{if(!u){auth.signInAnonymously().catch(e=>{err="";if(!started){started=true;start()}render()});return}if(!u.isAnonymous){me=u.uid;localStorage.setItem("sb_me",me)}if(!started){started=true;start()}render()});
  }catch(e){err=e.message;render()}
 })();
 </script></body></html>
