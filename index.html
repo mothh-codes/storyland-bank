@@ -29,6 +29,7 @@ pre{white-space:pre-wrap;background:var(--bg);border:1px dashed var(--mute);bord
 <div id="app"><p class="mute" style="text-align:center">Loading…</p></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 // ===== STEP 1: PASTE YOUR FIREBASE CONFIG HERE (replace this whole block) =====
 const FIREBASE_CONFIG={apiKey:"AIzaSyDcD7tNneEY23R8yPtY9aBXMWIDmxX0SX0",authDomain:"storyland-bank-b0400.firebaseapp.com",projectId:"storyland-bank-b0400",storageBucket:"storyland-bank-b0400.firebasestorage.app",messagingSenderId:"761721226563",appId:"1:761721226563:web:2d7a410e64b18ffef91bf6"};
@@ -105,11 +106,12 @@ act.join=()=>run(async()=>{const n=(draft.name||"").trim();if(!n)throw Error("En
 (()=>{
  try{
   if(String(FIREBASE_CONFIG.apiKey).startsWith("PASTE")){app.innerHTML='<div class="card"><b>Almost there!</b><p class="mute">Paste your Firebase config into the file first.</p></div>';return}
-  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.firestore();
+  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.firestore();const au=firebase.auth();let started=false;
   const bad=e=>{err=e.message||"Database error";render()};
-  db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
+  const start=()=>{db.collection("players").onSnapshot(q=>{loaded=true;players={};q.docs.forEach(d=>players[d.id]=d.data());render()},bad);
   db.collection("transfers").onSnapshot(q=>{tx=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
-  db.collection("requests").onSnapshot(q=>{bills=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);
+  db.collection("requests").onSnapshot(q=>{bills=q.docs.map(d=>({id:d.id,...d.data()}));render()},bad);};
+  au.onAuthStateChanged(u=>{if(!u){au.signInAnonymously().catch(e=>{err="Anonymous sign-in is not turned on in Firebase yet. ("+(e.code||e.message)+")";render()});return}if(!started){started=true;start()}});
  }catch(e){err=e.message;render()}
 })();
 </script></body></html>
