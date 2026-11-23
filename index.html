@@ -19,10 +19,12 @@ button:disabled{opacity:.5}
 .nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.nav button{width:auto;margin:0;padding:8px 12px;background:var(--line);color:var(--ink);font-size:14px;white-space:nowrap}.nav .on{background:var(--pri);color:#fff}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}.row:last-child{border:0}
 .in{color:var(--ok);font-weight:700}.out{color:var(--bad);font-weight:700}.mute{color:var(--mute);font-size:13px}.err{color:var(--bad);font-size:14px;margin-top:8px}
+.top{display:flex;gap:6px;position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 0;margin-bottom:8px}.top a{flex:1;text-align:center;padding:9px 6px;border-radius:12px;background:var(--line);color:var(--ink);text-decoration:none;font-size:14px;font-weight:700}.top a.on{background:var(--pri);color:#fff}
 .pair{display:flex;gap:8px}.pair button{margin-top:8px;padding:9px}.gray{background:var(--line)!important;color:var(--ink)!important}
 .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bad);color:#fff}
 pre{white-space:pre-wrap;background:var(--bg);border:1px dashed var(--mute);border-radius:10px;padding:12px;font-size:14px}
 </style></head><body>
+<nav class="top"><a class="on" href="index.html">🏰 Storyland Bank</a><a href="portal.html">🩺 Patient Portal</a></nav>
 <h1>🏰 Storyland Bank</h1>
 <div id="app"><p class="mute" style="text-align:center">Loading…</p></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -33,15 +35,15 @@ const FIREBASE_CONFIG={apiKey:"AIzaSyDcD7tNneEY23R8yPtY9aBXMWIDmxX0SX0",authDoma
 // ===== STEP 2: CHOOSE YOUR SECRET ADMIN PIN =====
 const ADMIN_PIN="1234";
 const START=1000,OD=100,ODFEE=25,RATE=.02;
-const SHOP=[["🎩","Fancy Hat",50],["🧹","Skip-a-Chore Pass",120],["🍕","Pizza Night",200],["😴","Day Off",300],["👑","Golden Crown",500],["🥩","Steak Liver",150]];
-const LBL={fee:"Fee",admin:"Bank adjustment",interest:"Interest earned",shop:"Shop purchase",bill:"Bill paid",save:"To savings",unsave:"From savings"};
+const SHOP=[["🍦","Ice Cream Cone",40],["🎩","Fancy Hat",50],["🕶️","Cool Sunglasses",75],["🧸","Teddy Bear",90],["🎮","Game Hour",110],["🧹","Skip-a-Chore Pass",120],["🥩","Steak Liver",150],["🎬","Movie Night",180],["🍕","Pizza Night",200],["🛁","Spa Day",250],["😴","Day Off",300],["🚲","Shiny Bike",350],["🏰","Castle Key",450],["👑","Golden Crown",500],["🐉","Pet Dragon",800],["🚀","Rocket Ride",1000]];
+const LBL={fee:"Fee",admin:"Bank adjustment",interest:"Interest earned",shop:"Shop purchase",bill:"Bill paid",save:"To savings",unsave:"From savings",use:"Used an item"};
 let db,loaded=false,me=localStorage.getItem("sb_me"),isOwner=false,players={},tx=[],bills=[],tab="home",err="",rc=null,draft={};
 const $=s=>document.querySelector(s),esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const nm=id=>id==="bank"?"Dr. Moth Hill's office":(players[id]&&players[id].name)||"Someone";
 const nm2=id=>id==="bank"?"Storyland Bank":id.endsWith(":s")?nm(id.slice(0,-2))+" (Savings)":nm(id);
 const bal=id=>tx.reduce((s,t)=>s+(t.to===id?t.amount:0)-(t.from===id?t.amount:0),id.includes(":")?0:START);
 const net=id=>bal(id)+bal(id+":s");
-const late=r=>r.due&&Date.now()>r.due?Math.max(5,Math.round(r.amount*.1)):0;
+const late=r=>{const d=Math.floor((Date.now()-(r.due||r.ts||0))/864e5);return d>0?Math.round(r.amount*Math.pow(1.05,d))-r.amount:0};
 const add=(from,to,amount,note,kind)=>db.collection("transfers").add({from,to,amount,note:note||"",kind:kind||"transfer",ts:Date.now()});
 const amt=()=>{const a=Math.floor(+draft.amt);if(!(a>0))throw Error("Enter an amount above 0.");return a};
 const need=(b,a)=>{if(b-a<-OD)throw Error("That goes past the "+OD+" SB overdraft limit.")};
@@ -54,10 +56,11 @@ const act={
  send:()=>run(async()=>{const a=amt(),b=bal(me);if(!draft.to)throw Error("Choose who to send to.");need(b,a);await add(me,draft.to,a,draft.note);await odfee(b,a);draft={}}),
  bill:()=>run(async()=>{const a=amt();if(!draft.to)throw Error("Choose who to bill.");await db.collection("requests").add({from:me,to:draft.to,amount:a,note:(draft.note||"").trim(),due:draft.due?new Date(draft.due+"T23:59:59").getTime():null,status:"pending",ts:Date.now()});draft={}}),
  pay:d=>run(async()=>{const r=bills.find(x=>x.id===d.id),t=r.amount+late(r),b=bal(me);need(b,t);await add(me,r.from,t,r.note||"Bill paid","bill");await setBill(r.id,"paid");await odfee(b,t)}),
- no:d=>run(()=>setBill(d.id,"declined")),cx:d=>run(()=>setBill(d.id,"canceled")),
+ cx:d=>run(async()=>{if(!confirm("Dismiss this bill? The other person will no longer owe it."))return;await setBill(d.id,"canceled")}),
  dep:()=>run(async()=>{const a=amt();need(bal(me),a);await add(me,me+":s",a,"","save");draft={}}),
  wd:()=>run(async()=>{const a=amt();if(a>bal(me+":s"))throw Error("Not enough in savings.");await add(me+":s",me,a,"","unsave");draft={}}),
- int:()=>run(async()=>{const i=Math.floor(bal(me+":s")*RATE);if(i<1)throw Error("Save at least "+Math.ceil(1/RATE)+" SB to earn interest.");await add("bank",me+":s",i,"2% daily interest","interest")}),
+ int:()=>run(async()=>{const mine=tx.filter(t=>t.to===me+":s"&&(t.kind==="save"||t.kind==="interest")),base=mine.reduce((m,t)=>Math.max(m,t.ts),0),wait=base+43200000-Date.now();if(base&&wait>0)throw Error("Interest can be collected again in "+Math.floor(wait/3600000)+"h "+Math.ceil(wait%3600000/60000)+"m.");const i=Math.floor(bal(me+":s")*RATE);if(i<1)throw Error("Save at least "+Math.ceil(1/RATE)+" SB to earn interest.");await add("bank",me+":s",i,"2% interest","interest")}),
+ use:d=>run(async()=>{const n=d.n,have=tx.filter(t=>t.from===me&&t.kind==="shop"&&t.note===n).length-tx.filter(t=>t.from===me&&t.kind==="use"&&t.note===n).length;if(have<1)throw Error("You don't have that item.");await add(me,me,0,n,"use")}),
  buy:d=>run(async()=>{const it=SHOP[d.i],b=bal(me);need(b,it[2]);await add(me,"bank",it[2],it[1],"shop");await odfee(b,it[2])}),
  adm:d=>run(async()=>{const a=amt();if(!draft.to)throw Error("Choose a player.");const n=draft.note||"";if(d.v==="add")await add("bank",draft.to,a,n||"Bank deposit","admin");else if(d.v==="rem")await add(draft.to,"bank",a,n||"Bank withdrawal","admin");else await add(draft.to,"bank",a,n||"Bank fee","fee");draft={}}),
  unlock:()=>run(async()=>{if(draft.pin!==ADMIN_PIN)throw Error("Wrong PIN.");isOwner=true;draft={}}),
@@ -78,18 +81,20 @@ function render(){
  const a=$("#app");
  if(!db||!loaded){a.innerHTML='<p class="mute" style="text-align:center">Connecting…</p>'+E();return}
  if(!players[me]){const ex=Object.keys(players);a.innerHTML='<div class="card"><b>Welcome to Storyland Bank!</b><p class="mute">New here? Pick a name and start with '+START+' Storyland Bucks (SB).</p>'+inp("name","Your name","e.g. Princess Ann")+'<button data-a="join">Join Storyland</button>'+(ex.length?'<hr style="border:0;border-top:1px solid var(--line);margin:16px 0"><p class="mute">Already have an account?</p><select id="pick"><option value="">Choose your name…</option>'+ex.map(i=>'<option value="'+i+'">'+esc(nm(i))+'</option>').join("")+'</select><button class="gray" data-a="pick">Sign back in</button>':'')+E()+'</div>';return}
- const others=Object.keys(players).filter(i=>i!==me),mine=tx.filter(t=>[t.from,t.to].some(x=>x===me||x===me+":s")).sort((x,y)=>y.ts-x.ts);
- const tabs=[["home","🏠 Home"],["bills","🧾 Bills"],["save","🐷 Savings"],["shop","🛍 Shop"]];tabs.push(["admin","🏦 Admin"]);
+ const others=Object.keys(players).filter(i=>i!==me),mine=tx.filter(t=>[t.from,t.to].some(x=>x===me||x===me+":s")&&t.kind!=="use").sort((x,y)=>y.ts-x.ts);
+ const tabs=[["home","🏠 Home"],["bills","🧾 Bills"],["save","🐷 Savings"],["shop","🛍 Shop"],["inv","🎒 Inventory"]];tabs.push(["admin","🏦 Admin"]);
  let h='<div class="hero"><small>'+esc(nm(me))+'\'s checking</small><div class="amt">'+bal(me)+' SB</div><small>Savings: '+bal(me+":s")+' SB</small></div><div class="nav" style="margin-top:12px">'+tabs.map(t=>btn("tab",t[1],t[0],tab===t[0]?"on":"")).join("")+'</div>';
  if(rc)h+='<div class="card"><b>Receipt</b><pre>'+esc(rtext(rc))+'</pre><div class="pair">'+btn("copy","Copy")+btn("close","Close","","gray")+'</div>'+E()+'</div>';
  if(tab==="home")h+='<div class="card"><b>Send Storyland Bucks</b>'+(others.length?'<label>To</label>'+sel(others,"Choose someone…")+inp("amt","Amount","0","number")+inp("note","Note (optional)","For the follow-up visit 🏥")+btn("send","Send")+'<p class="mute">Overdraft up to '+OD+' SB, with a '+ODFEE+' SB fee if you go below 0.</p>':'<p class="mute">Nobody else has joined yet. Share this page link.</p>')+E()+'</div><div class="card"><b>Activity</b>'+(mine.length?mine.map(row).join(""):'<p class="mute">No activity yet.</p>')+'</div>'+btn("sw","Switch player","","gray")+'<p style="text-align:center;margin-top:14px"><a href="portal.html" style="color:var(--pri);font-weight:700">Open the patient portal</a></p>';
  if(tab==="bills"){const inc=bills.filter(r=>r.to===me&&r.status==="pending"),out=bills.filter(r=>r.from===me&&r.status==="pending");
   h+='<div class="card"><b>Send a bill or request</b>'+(others.length?'<label>Bill to</label>'+sel(others,"Choose someone…")+inp("amt","Amount","0","number")+inp("note","Description","Missed appointment fee")+inp("due","Due date (optional)","","date")+btn("bill","Send bill"):'<p class="mute">Nobody else has joined yet.</p>')+E()+'</div>'+
-  '<div class="card"><b>Bills to pay</b>'+(inc.length?inc.map(r=>{const l=late(r);return '<div class="row"><div><b>'+esc(nm(r.from))+'</b> · '+r.amount+' SB '+(l?'<span class="tag">OVERDUE +'+l+' late fee</span>':'')+'<div class="mute">'+esc(r.note)+(r.due?' · due '+new Date(r.due).toLocaleDateString():'')+'</div><div class="pair"><button data-a="pay" data-id="'+r.id+'">Pay '+(r.amount+l)+'</button><button class="gray" data-a="no" data-id="'+r.id+'">Decline</button></div></div></div>'}).join(""):'<p class="mute">Nothing due.</p>')+'</div>'+
-  '<div class="card"><b>Waiting on others</b>'+(out.length?out.map(r=>'<div class="row"><div>'+esc(nm(r.to))+' · '+r.amount+' SB '+(late(r)?'<span class="tag">OVERDUE</span>':'<span class="mute">pending</span>')+'<div class="mute">'+esc(r.note)+(r.due?' · due '+new Date(r.due).toLocaleDateString():'')+'</div></div><button class="gray" style="width:auto;margin:0;padding:8px 12px" data-a="cx" data-id="'+r.id+'">Cancel</button></div>').join(""):'<p class="mute">No open bills.</p>')+'</div>'}
- if(tab==="save")h+='<div class="card"><b>🐷 Savings: '+bal(me+":s")+' SB</b><p class="mute">Earns pretend interest: 2% once a day.</p>'+inp("amt","Amount","0","number")+'<div class="pair">'+btn("dep","Deposit")+btn("wd","Withdraw","","gray")+'</div>'+btn("int","Collect daily interest","","gray")+E()+'</div>';
- if(tab==="shop"){const own={};tx.filter(t=>t.kind==="shop"&&t.from===me).forEach(t=>own[t.note]=(own[t.note]||0)+1);
+  '<div class="card"><b>Bills to pay</b>'+(inc.length?inc.map(r=>{const l=late(r);return '<div class="row"><div><b>'+esc(nm(r.from))+'</b> · '+r.amount+' SB '+(l?'<span class="tag">+'+l+' (5% added per day)</span>':'')+'<div class="mute">'+esc(r.note)+(r.due?' · due '+new Date(r.due).toLocaleDateString():'')+'</div><div class="pair"><button data-a="pay" data-id="'+r.id+'">Pay '+(r.amount+l)+'</button></div></div></div>'}).join(""):'<p class="mute">Nothing due.</p>')+'</div>'+
+  '<div class="card"><b>Waiting on others</b>'+(out.length?out.map(r=>'<div class="row"><div>'+esc(nm(r.to))+' · '+r.amount+' SB '+(late(r)?'<span class="tag">OVERDUE</span>':'<span class="mute">pending</span>')+'<div class="mute">'+esc(r.note)+(r.due?' · due '+new Date(r.due).toLocaleDateString():'')+'</div></div><button class="gray" style="width:auto;margin:0;padding:8px 12px" data-a="cx" data-id="'+r.id+'">Dismiss</button></div>').join(""):'<p class="mute">No open bills.</p>')+'</div>'}
+ if(tab==="save")h+='<div class="card"><b>🐷 Savings: '+bal(me+":s")+' SB</b><p class="mute">Earns pretend interest: 2%, and you can collect it once every 12 hours after you deposit.</p>'+inp("amt","Amount","0","number")+'<div class="pair">'+btn("dep","Deposit")+btn("wd","Withdraw","","gray")+'</div>'+btn("int","Collect interest","","gray")+E()+'</div>';
+ if(tab==="shop"){const own={};tx.filter(t=>t.kind==="shop"&&t.from===me).forEach(t=>own[t.note]=(own[t.note]||0)+1);tx.filter(t=>t.kind==="use"&&t.from===me).forEach(t=>own[t.note]=(own[t.note]||0)-1);
   h+='<div class="card"><b>Storyland Shop</b>'+SHOP.map((s,i)=>'<div class="row"><div>'+s[0]+' '+s[1]+'<div class="mute">'+s[2]+' SB'+(own[s[1]]?' · you own '+own[s[1]]:'')+'</div></div><button style="width:auto;margin:0;padding:8px 14px" data-a="buy" data-i="'+i+'">Buy</button></div>').join("")+E()+'</div>'}
+ if(tab==="inv"){const own={};tx.filter(t=>t.kind==="shop"&&t.from===me).forEach(t=>own[t.note]=(own[t.note]||0)+1);tx.filter(t=>t.kind==="use"&&t.from===me).forEach(t=>own[t.note]=(own[t.note]||0)-1);const names=Object.keys(own).filter(n=>own[n]>0),buys=tx.filter(t=>t.kind==="shop"&&t.from===me).sort((x,y)=>y.ts-x.ts);
+  h+='<div class="card"><b>🎒 My Inventory</b>'+(names.length?names.map(n=>{const it=SHOP.find(q=>q[1]===n)||["🎁",n];return '<div class="row"><div>'+it[0]+' '+esc(n)+'<div class="mute">You own '+own[n]+'</div></div><button style="width:auto;margin:0;padding:8px 14px" data-a="use" data-n="'+esc(n)+'">Use</button></div>'}).join(""):'<p class="mute">Nothing yet. Visit the Shop to buy something.</p>')+E()+'</div><div class="card"><b>Purchase history</b>'+(buys.length?buys.map(row).join(""):'<p class="mute">No purchases yet.</p>')+'</div>'}
  if(tab==="admin"&&!isOwner)h+='<div class="card"><b>🏦 Bank admin</b>'+inp("pin","Admin PIN","","password")+btn("unlock","Unlock")+E()+'</div>';if(tab==="admin"&&isOwner)h+='<div class="card"><b>🏦 Bank admin</b><p class="mute">Only the bank owner sees this.</p><label>Player</label>'+sel(Object.keys(players),"Choose a player…")+inp("amt","Amount","0","number")+inp("note","Note (optional)","Late fee")+'<div class="pair">'+btn("adm","Add","add")+btn("adm","Remove","rem","gray")+'</div>'+btn("adm","Charge fee","fee","gray")+E()+'</div>';
  a.innerHTML=h;
 }
